@@ -1,0 +1,112 @@
+DROP DATABASE pgonstat_test;
+CREATE DATABASE pgonstat_test;
+\c pgonstat_test
+
+
+CREATE OR REPLACE FUNCTION make_stat_table(schema_name text, table_name text, id_col text, stat_on_col text) RETURNS text AS $$
+DECLARE
+    stat_table text;
+    ins_name text;
+    up_name text;
+    del_name text;
+    trunc_name text;
+    type_name text;
+BEGIN
+    stat_table := schema_name || '.' || table_name || '_' || stat_on_col || '_agg_stats';
+    ins_name := table_name || '_' || stat_on_col || '_ins_trigger_func';
+    up_name := table_name || '_' || stat_on_col || '_up_trigger_func';
+    del_name := table_name || '_' || stat_on_col || '_del_trigger_func';
+    trunc_name := table_name || '_' || stat_on_col || '_trunc_trigger_func';
+    type_name := table_name || '_' || stat_on_col || '_stats';
+
+    EXECUTE 'CREATE TABLE ' || stat_table  || ' ( ' || id_col || ' int, count int, sum int, sqsum int)';
+    EXECUTE 'CREATE TYPE ' || type_name || ' AS (' || id_col || ' int, average real, stddev real)';
+
+    EXECUTE 'CREATE FUNCTION ' || trunc_name || ' () RETURNS trigger AS $del_trig$
+    BEGIN
+        TRUNCATE ' || stat_table || ';
+        RETURN NULL;
+    END;
+    $del_trig$ LANGUAGE plpgsql;';
+    EXECUTE 'CREATE FUNCTION ' || del_name || ' () RETURNS trigger AS $del_trig$
+    BEGIN
+        UPDATE ' || stat_table || '
+            SET count = count - 1, 
+                sum = sum - OLD.' || stat_on_col || ', 
+                sqsum = sqsum - (OLD.' || stat_on_col || ' * OLD.' || stat_on_col || ')
+            WHERE ' || id_col || ' = OLD.' || id_col || '; 
+        RETURN OLD;
+    END;
+    $del_trig$ LANGUAGE plpgsql;';
+
+
+    EXECUTE 'CREATE FUNCTION ' || up_name || ' () RETURNS trigger AS $up_trig$
+    BEGIN
+        UPDATE ' || stat_table || '
+            SET count = count, 
+                sum = sum + NEW.' || stat_on_col || ' - OLD.' || stat_on_col || ', 
+                sqsum = sqsum + (NEW.' || stat_on_col || ' * NEW.' || stat_on_col || ') - (OLD.' || stat_on_col || ' * OLD.' || stat_on_col || ')
+            WHERE ' || id_col || ' = NEW.' || id_col || '; 
+        RETURN NEW;
+    END;
+    $up_trig$ LANGUAGE plpgsql;';
+
+    EXECUTE 'CREATE FUNCTION ' || ins_name || ' () RETURNS trigger AS $ins_trig$
+    BEGIN
+        IF EXISTS (SELECT ' || id_col || ' FROM ' || stat_table || ' WHERE ' || id_col || ' = NEW.' || id_col || ') THEN
+            UPDATE ' || stat_table || '
+                SET count = count + 1, 
+                    sum = sum + NEW.' || stat_on_col || ', 
+                    sqsum = sqsum + (NEW.' || stat_on_col || ' * NEW.' || stat_on_col || ') 
+                WHERE ' || id_col || ' = NEW.' || id_col || '; 
+        ELSE
+            INSERT INTO ' || stat_table || ' (' || id_col || ', count, sum, sqsum) VALUES (NEW.' || id_col || ', 1, NEW.' || stat_on_col || ', NEW.' || stat_on_col || ' * NEW.' || stat_on_col || ');
+        END IF;
+        RETURN NEW;
+    END;
+    $ins_trig$ LANGUAGE plpgsql;';
+
+    EXECUTE 'CREATE FUNCTION get_' || table_name || '_' || stat_on_col || '_stats() RETURNS SETOF ' || type_name || ' AS $all_stats$
+    BEGIN
+        RETURN QUERY SELECT ' || id_col ||  ', (sum::real/count::real) AS average, SQRT((sqsum::real/count::real) - ((sum::real/count::real)*(sum::real/count::real)))::real AS stddev FROM ' || stat_table || ';
+    END;
+    $all_stats$ LANGUAGE plpgsql;';
+
+    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_trunc_trigger AFTER TRUNCATE ON ' || schema_name || '.' || table_name || ' EXECUTE PROCEDURE ' || trunc_name || '();';
+    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_del_trigger AFTER DELETE ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || del_name || '();';
+    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_up_trigger AFTER UPDATE ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || up_name || '();';
+    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_ins_trigger AFTER INSERT ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || ins_name || '();';
+
+    RETURN '';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE ratings(id int, rating int);
+
+SELECT make_stat_table('public', 'ratings', 'id', 'rating');
+
+INSERT INTO ratings (id, rating) VALUES (1,2);
+INSERT INTO ratings (id, rating) VALUES (1,4);
+INSERT INTO ratings (id, rating) VALUES (1,3);
+
+SELECT * FROM ratings;
+SELECT * FROM ratings_rating_agg_stats;
+SELECT * FROM get_ratings_rating_stats();
+
+UPDATE ratings SET rating = 4 WHERE rating = 3;
+
+SELECT * FROM ratings;
+SELECT * FROM ratings_rating_agg_stats;
+SELECT * FROM get_ratings_rating_stats();
+
+DELETE FROM ratings WHERE rating = 2;
+
+SELECT * FROM ratings;
+SELECT * FROM ratings_rating_agg_stats;
+SELECT * FROM get_ratings_rating_stats();
+
+TRUNCATE ratings;
+
+SELECT * FROM ratings;
+SELECT * FROM ratings_rating_agg_stats;
+SELECT * FROM get_ratings_rating_stats();
