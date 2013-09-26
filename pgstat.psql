@@ -12,15 +12,15 @@ DECLARE
     trunc_name text;
     type_name text;
 BEGIN
-    stat_table := schema_name || '.' || table_name || '_' || stat_on_col || '_agg_stats';
-    ins_name := table_name || '_' || stat_on_col || '_ins_trigger_func';
-    up_name := table_name || '_' || stat_on_col || '_up_trigger_func';
-    del_name := table_name || '_' || stat_on_col || '_del_trigger_func';
-    trunc_name := table_name || '_' || stat_on_col || '_trunc_trigger_func';
-    type_name := table_name || '_' || stat_on_col || '_stats';
+    stat_table := quote_ident(schema_name) || '.' || quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_agg_stats';
+    ins_name := quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_ins_trigger_func';
+    up_name := quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_up_trigger_func';
+    del_name := quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_del_trigger_func';
+    trunc_name := quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_trunc_trigger_func';
+    type_name := quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_stats';
 
-    EXECUTE 'CREATE TABLE ' || stat_table  || ' ( ' || id_col || ' int, count int, sum int, sqsum int)';
-    EXECUTE 'CREATE TYPE ' || type_name || ' AS (' || id_col || ' int, average real, stddev real)';
+    EXECUTE 'CREATE TABLE ' || stat_table  || ' ( ' || quote_ident(id_col) || ' int, count int, sum int, sqsum int)';
+    EXECUTE 'CREATE TYPE ' || type_name || ' AS (' || quote_ident(id_col) || ' int, average real, stddev_pop real)';
 
     EXECUTE 'CREATE FUNCTION ' || trunc_name || ' () RETURNS trigger AS $del_trig$
     BEGIN
@@ -32,9 +32,9 @@ BEGIN
     BEGIN
         UPDATE ' || stat_table || '
             SET count = count - 1, 
-                sum = sum - OLD.' || stat_on_col || ', 
-                sqsum = sqsum - (OLD.' || stat_on_col || ' * OLD.' || stat_on_col || ')
-            WHERE ' || id_col || ' = OLD.' || id_col || '; 
+                sum = sum - OLD.' || quote_ident(stat_on_col) || ', 
+                sqsum = sqsum - (OLD.' || quote_ident(stat_on_col) || ' * OLD.' || quote_ident(stat_on_col) || ')
+            WHERE ' || quote_ident(id_col) || ' = OLD.' || quote_ident(id_col) || '; 
         RETURN OLD;
     END;
     $del_trig$ LANGUAGE plpgsql;';
@@ -44,38 +44,38 @@ BEGIN
     BEGIN
         UPDATE ' || stat_table || '
             SET count = count, 
-                sum = sum + NEW.' || stat_on_col || ' - OLD.' || stat_on_col || ', 
-                sqsum = sqsum + (NEW.' || stat_on_col || ' * NEW.' || stat_on_col || ') - (OLD.' || stat_on_col || ' * OLD.' || stat_on_col || ')
-            WHERE ' || id_col || ' = NEW.' || id_col || '; 
+                sum = sum + NEW.' || quote_ident(stat_on_col) || ' - OLD.' || quote_ident(stat_on_col) || ', 
+                sqsum = sqsum + (NEW.' || quote_ident(stat_on_col) || ' * NEW.' || quote_ident(stat_on_col) || ') - (OLD.' || quote_ident(stat_on_col) || ' * OLD.' || quote_ident(stat_on_col) || ')
+            WHERE ' || quote_ident(id_col) || ' = NEW.' || quote_ident(id_col) || '; 
         RETURN NEW;
     END;
     $up_trig$ LANGUAGE plpgsql;';
 
     EXECUTE 'CREATE FUNCTION ' || ins_name || ' () RETURNS trigger AS $ins_trig$
     BEGIN
-        IF EXISTS (SELECT ' || id_col || ' FROM ' || stat_table || ' WHERE ' || id_col || ' = NEW.' || id_col || ') THEN
+        IF EXISTS (SELECT ' || quote_ident(id_col) || ' FROM ' || stat_table || ' WHERE ' || quote_ident(id_col) || ' = NEW.' || quote_ident(id_col) || ') THEN
             UPDATE ' || stat_table || '
                 SET count = count + 1, 
-                    sum = sum + NEW.' || stat_on_col || ', 
-                    sqsum = sqsum + (NEW.' || stat_on_col || ' * NEW.' || stat_on_col || ') 
-                WHERE ' || id_col || ' = NEW.' || id_col || '; 
+                    sum = sum + NEW.' || quote_ident(stat_on_col) || ', 
+                    sqsum = sqsum + (NEW.' || quote_ident(stat_on_col) || ' * NEW.' || quote_ident(stat_on_col) || ') 
+                WHERE ' || quote_ident(id_col) || ' = NEW.' || quote_ident(id_col) || '; 
         ELSE
-            INSERT INTO ' || stat_table || ' (' || id_col || ', count, sum, sqsum) VALUES (NEW.' || id_col || ', 1, NEW.' || stat_on_col || ', NEW.' || stat_on_col || ' * NEW.' || stat_on_col || ');
+            INSERT INTO ' || stat_table || ' (' || quote_ident(id_col) || ', count, sum, sqsum) VALUES (NEW.' || quote_ident(id_col) || ', 1, NEW.' || quote_ident(stat_on_col) || ', NEW.' || quote_ident(stat_on_col) || ' * NEW.' || quote_ident(stat_on_col) || ');
         END IF;
         RETURN NEW;
     END;
     $ins_trig$ LANGUAGE plpgsql;';
 
-    EXECUTE 'CREATE FUNCTION get_' || table_name || '_' || stat_on_col || '_stats() RETURNS SETOF ' || type_name || ' AS $all_stats$
+    EXECUTE 'CREATE FUNCTION get_' || quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_stats() RETURNS SETOF ' || type_name || ' AS $all_stats$
     BEGIN
-        RETURN QUERY SELECT ' || id_col ||  ', (sum::real/count::real) AS average, SQRT((sqsum::real/count::real) - ((sum::real/count::real)*(sum::real/count::real)))::real AS stddev FROM ' || stat_table || ';
+        RETURN QUERY SELECT ' || quote_ident(id_col) ||  ', (sum::real/count::real) AS average, SQRT((sqsum::real/count::real) - ((sum::real/count::real)*(sum::real/count::real)))::real AS stddev_pop FROM ' || stat_table || ';
     END;
     $all_stats$ LANGUAGE plpgsql;';
 
-    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_trunc_trigger AFTER TRUNCATE ON ' || schema_name || '.' || table_name || ' EXECUTE PROCEDURE ' || trunc_name || '();';
-    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_del_trigger AFTER DELETE ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || del_name || '();';
-    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_up_trigger AFTER UPDATE ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || up_name || '();';
-    EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_ins_trigger AFTER INSERT ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || ins_name || '();';
+    EXECUTE 'CREATE TRIGGER ' || quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_trunc_trigger AFTER TRUNCATE ON ' || quote_ident(schema_name) || '.' || quote_ident(table_name) || ' EXECUTE PROCEDURE ' || trunc_name || '();';
+    EXECUTE 'CREATE TRIGGER ' || quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_del_trigger AFTER DELETE ON ' || quote_ident(schema_name) || '.' || quote_ident(table_name) || ' FOR EACH ROW EXECUTE PROCEDURE ' || del_name || '();';
+    EXECUTE 'CREATE TRIGGER ' || quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_up_trigger AFTER UPDATE ON ' || quote_ident(schema_name) || '.' || quote_ident(table_name) || ' FOR EACH ROW EXECUTE PROCEDURE ' || up_name || '();';
+    EXECUTE 'CREATE TRIGGER ' || quote_ident(table_name) || '_' || quote_ident(stat_on_col) || '_ins_trigger AFTER INSERT ON ' || quote_ident(schema_name) || '.' || quote_ident(table_name) || ' FOR EACH ROW EXECUTE PROCEDURE ' || ins_name || '();';
 
 END;
 $$ LANGUAGE plpgsql;
