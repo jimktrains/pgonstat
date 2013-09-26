@@ -3,7 +3,7 @@ CREATE DATABASE pgonstat_test;
 \c pgonstat_test
 
 
-CREATE OR REPLACE FUNCTION make_stat_table(schema_name text, table_name text, id_col text, stat_on_col text) RETURNS text AS $$
+CREATE OR REPLACE FUNCTION make_stat_table(schema_name text, table_name text, id_col text, stat_on_col text) RETURNS VOID AS $$
 DECLARE
     stat_table text;
     ins_name text;
@@ -77,7 +77,6 @@ BEGIN
     EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_up_trigger AFTER UPDATE ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || up_name || '();';
     EXECUTE 'CREATE TRIGGER ' || table_name || '_' || stat_on_col || '_ins_trigger AFTER INSERT ON ' || schema_name || '.' || table_name || ' FOR EACH ROW EXECUTE PROCEDURE ' || ins_name || '();';
 
-    RETURN '';
 END;
 $$ LANGUAGE plpgsql;
 
