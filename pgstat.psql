@@ -90,22 +90,26 @@ INSERT INTO ratings (id, rating) VALUES (1,3);
 
 SELECT * FROM ratings;
 SELECT * FROM ratings_rating_agg_stats;
+SELECT id, SUM(rating), AVG(rating)::real, STDDEV_POP(rating)::real FROM ratings GROUP BY id;
 SELECT * FROM get_ratings_rating_stats();
 
 UPDATE ratings SET rating = 4 WHERE rating = 3;
 
 SELECT * FROM ratings;
 SELECT * FROM ratings_rating_agg_stats;
+SELECT id, SUM(rating), AVG(rating)::real, STDDEV_POP(rating)::real FROM ratings GROUP BY id;
 SELECT * FROM get_ratings_rating_stats();
 
 DELETE FROM ratings WHERE rating = 2;
 
 SELECT * FROM ratings;
 SELECT * FROM ratings_rating_agg_stats;
+SELECT id, SUM(rating), AVG(rating)::real, STDDEV_POP(rating)::real FROM ratings GROUP BY id;
 SELECT * FROM get_ratings_rating_stats();
 
 TRUNCATE ratings;
 
 SELECT * FROM ratings;
 SELECT * FROM ratings_rating_agg_stats;
+SELECT id, SUM(rating), AVG(rating)::real, STDDEV_POP(rating)::real FROM ratings GROUP BY id;
 SELECT * FROM get_ratings_rating_stats();
